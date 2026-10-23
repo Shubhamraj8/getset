@@ -34,6 +34,8 @@ class ForecastSeriesItem(BaseModel):
     publish_time: str
     horizon_h: float
     actual_mw: Optional[float] = None
+    band_lower_mw: Optional[float] = None
+    band_upper_mw: Optional[float] = None
 
 
 class ForecastCoverage(BaseModel):

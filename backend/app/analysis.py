@@ -294,3 +294,36 @@ def get_delivery_dates(start: str, end: str) -> List[str]:
     s = pd.Timestamp(start)
     e = pd.Timestamp(end)
     return [d.strftime("%Y-%m-%d") for d in pd.date_range(s, e, freq="D")]
+
+
+def compute_horizon_error_quantiles(
+    forecasts: pd.DataFrame,
+    actuals: pd.DataFrame,
+    bin_size_h: int = HORIZON_BIN_SIZE_H,
+) -> Dict[str, Tuple[float, float]]:
+    """Compute P10 and P90 error for each horizon bin across all data (D3 = A)."""
+    hourly_actuals = aggregate_actuals_to_hourly(actuals)
+    merged = forecasts.merge(hourly_actuals, on="start_time", how="inner")
+    if merged.empty:
+        return {}
+
+    merged["error_mw"] = merged["forecast_mw"] - merged["actual_mw"]
+    max_h = merged["horizon_h"].max()
+    bins = list(range(0, int(max_h) + bin_size_h + 1, bin_size_h))
+    labels = [f"{bins[i]}-{bins[i+1]}" for i in range(len(bins) - 1)]
+
+    merged["horizon_bin"] = pd.cut(merged["horizon_h"], bins=bins, labels=labels, right=False)
+    quantiles = {}
+    for label, grp in merged.groupby("horizon_bin", observed=False):
+        if not grp.empty:
+            p10 = float(np.quantile(grp["error_mw"], 0.10))
+            p90 = float(np.quantile(grp["error_mw"], 0.90))
+            quantiles[str(label)] = (p10, p90)
+    return quantiles
+
+
+def get_horizon_bin_label(horizon_h: float, bin_size_h: int = HORIZON_BIN_SIZE_H) -> str:
+    """Return bin label e.g. '24-30' for a given horizon in hours."""
+    low = int(np.floor(horizon_h / bin_size_h)) * bin_size_h
+    return f"{low}-{low + bin_size_h}"
+

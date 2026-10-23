@@ -37,8 +37,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Pre-compute delivery days list
+# Pre-compute delivery days list and historical error quantiles (for D3 = A error band)
 ALL_DELIVERY_DAYS = analysis.get_delivery_dates(DELIVERY_START, DELIVERY_END)
+HORIZON_ERROR_QUANTILES = analysis.compute_horizon_error_quantiles(FORECASTS_DF, ACTUALS_DF)
 
 
 def _validate_delivery_date(delivery_date: str) -> None:
@@ -127,6 +128,19 @@ def forecast(
     for _, row in fc.iterrows():
         actual_match = hourly_actuals[hourly_actuals["start_time"] == row["start_time"]]
         actual_mw = float(actual_match["actual_mw"].iloc[0]) if not actual_match.empty else None
+
+        # Historical error band (D3 = A)
+        h_bin = analysis.get_horizon_bin_label(float(row["horizon_h"]))
+        quantiles = HORIZON_ERROR_QUANTILES.get(h_bin)
+        band_lower = None
+        band_upper = None
+        if quantiles is not None:
+            p10, p90 = quantiles
+            b1 = max(0.0, round(float(row["forecast_mw"]) + p10, 1))
+            b2 = max(0.0, round(float(row["forecast_mw"]) + p90, 1))
+            band_lower = min(b1, b2)
+            band_upper = max(b1, b2)
+
         series.append(
             ForecastSeriesItem(
                 start_time=row["start_time"].strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -134,6 +148,8 @@ def forecast(
                 publish_time=row["publish_time"].strftime("%Y-%m-%dT%H:%M:%SZ"),
                 horizon_h=round(float(row["horizon_h"]), 2),
                 actual_mw=actual_mw,
+                band_lower_mw=band_lower,
+                band_upper_mw=band_upper,
             )
         )
 
