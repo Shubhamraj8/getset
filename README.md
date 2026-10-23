@@ -3,8 +3,9 @@
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![React](https://img.shields.io/badge/Frontend-React%20%2B%20Vite%20%2B%20TS-61DAFB?logo=react&logoColor=black)](https://reactjs.org/)
 [![Docker](https://img.shields.io/badge/Container-Docker%20Compose-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
-[![License](https://img.shields.io/badge/License-Proprietary-blue.svg)](#)
+[![GitHub](https://img.shields.io/badge/GitHub-Shubhamraj8%2Fgetset-181717?logo=github&logoColor=white)](https://github.com/Shubhamraj8/getset)
 
+**GitHub Repository:** [https://github.com/Shubhamraj8/getset](https://github.com/Shubhamraj8/getset)  
 A dedicated operational intelligence and forecast evaluation application built for the **day-ahead electricity procurement desk** at a UK energy utility.
 
 ---
