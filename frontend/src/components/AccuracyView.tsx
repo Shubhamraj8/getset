@@ -12,7 +12,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { type AccuracyResponse, fetchAccuracy } from '../api';
+import { fetchAccuracy, type AccuracyResponse } from '../api';
 import { AccuracyControls } from './Controls';
 import { MetricCard } from './MetricCard';
 
@@ -38,51 +38,29 @@ export const AccuracyView: React.FC<AccuracyViewProps> = ({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    let isCancelled = false;
+    let cancelled = false;
     setLoading(true);
     setError(null);
 
     fetchAccuracy(startDate, endDate, cutoffHour)
-      .then((res) => {
-        if (!isCancelled) {
-          setData(res);
-          setLoading(false);
-        }
-      })
-      .catch((err) => {
-        if (!isCancelled) {
-          setError(err.message || 'Failed to load accuracy evaluation');
-          setLoading(false);
-        }
-      });
+      .then((res) => { if (!cancelled) { setData(res); setLoading(false); } })
+      .catch((err) => { if (!cancelled) { setError(err.message || 'Failed to load accuracy'); setLoading(false); } });
 
-    return () => {
-      isCancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [startDate, endDate, cutoffHour]);
 
   const overall = data?.overall;
 
-  // Sign convention badge for bias
-  const biasBadge =
-    overall?.ME != null
-      ? overall.ME > 50
-        ? { text: 'Over-forecast bias', type: 'over' as const }
-        : overall.ME < -50
-        ? { text: 'Under-forecast bias', type: 'under' as const }
-        : { text: 'Near neutral', type: 'neutral' as const }
-      : undefined;
+  /* ── Data transforms ──────────────────────────────── */
 
-  // Format daily trend data
   const dailyData = (data?.daily || []).map((d) => ({
-    date: d.date.slice(5), // MM-DD for clean x-axis
+    date: d.date.slice(5),
     fullDate: d.date,
     mae: d.MAE,
     me: d.ME,
     n: d.n,
   }));
 
-  // Format hour of day data
   const hourData = (data?.by_hour || []).map((h) => ({
     hour: `${String(h.hour).padStart(2, '0')}:00`,
     mae: h.MAE,
@@ -90,7 +68,6 @@ export const AccuracyView: React.FC<AccuracyViewProps> = ({
     n: h.n,
   }));
 
-  // Format horizon bin data
   const horizonData = (data?.by_horizon || []).map((h) => ({
     bin: `${h.bin}h`,
     mae: h.MAE,
@@ -99,15 +76,15 @@ export const AccuracyView: React.FC<AccuracyViewProps> = ({
     n: h.n,
   }));
 
-  // Format histogram data
   const histData = (data?.error_histogram || []).map((b) => ({
-    bin: `${b.bin_start >= 0 ? '+' : ''}${b.bin_start} to ${b.bin_end >= 0 ? '+' : ''}${b.bin_end}`,
+    bin: `${b.bin_start >= 0 ? '+' : ''}${b.bin_start}`,
     mid: (b.bin_start + b.bin_end) / 2,
     count: b.count,
   }));
 
   return (
     <div>
+      {/* Controls */}
       <AccuracyControls
         deliveryDays={deliveryDays}
         startDate={startDate}
@@ -118,275 +95,232 @@ export const AccuracyView: React.FC<AccuracyViewProps> = ({
         onChangeCutoffHour={setCutoffHour}
       />
 
+      {/* Sign convention banner */}
+      <div className="convention-banner">
+        <span className="convention-formula">error = forecast − actual (MW)</span>
+        <span className="convention-note">
+          <span className="pos">Positive → over-forecast</span> (under-bought day-ahead) ·{' '}
+          <span className="neg">Negative → under-forecast</span> (over-bought day-ahead)
+        </span>
+      </div>
+
       {error && (
-        <div className="error-banner">
-          <span>⚠️ {error}</span>
+        <div style={{ background: 'rgba(244,63,94,0.1)', border: '1px solid rgba(244,63,94,0.25)', padding: '0.85rem 1rem', borderRadius: 'var(--radius-md)', color: '#fca5a5', marginBottom: '1rem', fontSize: '0.82rem' }}>
+          ⚠ {error}
         </div>
       )}
-
-      {/* Domain Primer: Sign Convention Explainer */}
-      <div className="callout-box">
-        <div className="callout-title">
-          <span>📐 Sign Convention & Decision Context</span>
-        </div>
-        <p>
-          Forecast error is defined as{' '}
-          <span className="callout-formula">error = forecast − actual (MW)</span>:
-        </p>
-        <ul style={{ paddingLeft: '1.25rem', marginTop: '0.35rem' }}>
-          <li>
-            <strong style={{ color: 'var(--accent-rose)' }}>Positive Error (&gt; 0)</strong>: Over-forecast. Wind generation turned out lower than anticipated, meaning the procurement desk would have under-bought alternative/thermal power on the day-ahead market.
-          </li>
-          <li>
-            <strong style={{ color: 'var(--accent-emerald)' }}>Negative Error (&lt; 0)</strong>: Under-forecast. Actual wind generation exceeded expectations, meaning excess alternative power may have been procured.
-          </li>
-        </ul>
-      </div>
 
       {loading ? (
         <div className="state-box">
           <div className="spinner" />
-          <p>Evaluating forecast accuracy for {startDate} to {endDate}...</p>
+          <p>Computing accuracy metrics…</p>
         </div>
       ) : !data || !overall || overall.n === 0 ? (
         <div className="state-box">
-          <span className="state-icon">📊</span>
-          <p>No paired forecast-actual observations found for the selected range.</p>
+          <p>No paired forecast-actual observations for this range.</p>
         </div>
       ) : (
         <>
-          {/* Top Metric Cards */}
-          <div className="metrics-grid">
+          {/* Headline metrics */}
+          <div className="stats-row">
             <MetricCard
-              title="MAE (Mean Absolute Error)"
+              label="Mean Absolute Error"
               value={overall.MAE?.toLocaleString()}
-              unit="MW"
-              tooltipNote="Average magnitude of forecast error across all evaluated hours."
+              unit=" MW"
+              accent="cyan"
+              footer="Average magnitude of forecast miss"
+              trend={{ direction: 'neutral', text: `${overall.nMAE_pct}% nMAE` }}
             />
-
             <MetricCard
-              title="RMSE (Root Mean Square)"
+              label="Systematic Bias (ME)"
+              value={overall.ME != null ? (overall.ME > 0 ? `+${overall.ME.toLocaleString()}` : overall.ME.toLocaleString()) : '—'}
+              unit=" MW"
+              accent="amber"
+              footer="Net over-prediction across January"
+              trend={{ direction: overall.ME != null && overall.ME > 0 ? 'up' : 'down', text: overall.ME != null && overall.ME > 0 ? 'Over' : 'Under' }}
+            />
+            <MetricCard
+              label="RMSE"
               value={overall.RMSE?.toLocaleString()}
-              unit="MW"
-              tooltipNote="Root mean squared error; places higher penalty on large forecasting misses."
+              unit=" MW"
+              accent="purple"
+              footer="Penalises large misses more heavily"
+              trend={{ direction: 'neutral', text: 'RMS' }}
             />
-
             <MetricCard
-              title="Bias (Mean Error)"
-              value={overall.ME != null ? (overall.ME > 0 ? `+${overall.ME}` : overall.ME) : '—'}
-              unit="MW"
-              tooltipNote="Systematic bias. Positive indicates net tendency to over-predict."
-              badge={biasBadge}
-            />
-
-            <MetricCard
-              title="Normalized MAE"
-              value={overall.nMAE_pct != null ? `${overall.nMAE_pct}%` : '—'}
-              tooltipNote="MAE relative to average actual wind output (preferred over MAPE near zero)."
-            />
-
-            <MetricCard
-              title="P95 Absolute Error"
+              label="P95 Tail Risk"
               value={overall.P95_abs_error?.toLocaleString()}
-              unit="MW"
-              tooltipNote="95% of hourly forecast errors were smaller than this absolute magnitude."
+              unit=" MW"
+              accent="rose"
+              footer="95% of errors within this envelope"
+              trend={{ direction: 'down', text: '95th' }}
             />
-
             <MetricCard
-              title="Sample Size (n)"
+              label="Sample Size"
               value={overall.n.toLocaleString()}
-              unit="hours"
-              tooltipNote="Total paired hourly decision-time forecast vs actual comparisons."
+              unit=" hrs"
+              accent="emerald"
+              footer="Complete paired observations"
+              trend={{ direction: 'up', text: '100%' }}
             />
           </div>
 
-          {/* Row 1: Error vs Horizon & Daily Trend */}
-          <div className="charts-grid-2col">
-            {/* Chart 1: Error vs Horizon */}
+          {/* Chart row: Horizon + Risk summary */}
+          <div className="grid-2-wide-left">
             <div className="chart-card">
-              <div className="chart-header">
+              <div className="chart-card-header">
                 <div>
-                  <h3 className="chart-title">Error vs Forecast Horizon (Lead Time)</h3>
-                  <p className="chart-subtitle">
-                    Evaluation of all published forecasts grouped into 6-hour horizon bins.
-                  </p>
+                  <div className="chart-card-title">Error vs Forecast Lead Horizon</div>
+                  <div className="chart-card-desc">
+                    All published forecasts grouped into 6h lead bins. MAE grows with horizon.
+                  </div>
                 </div>
               </div>
-              <div className="chart-wrapper-compact">
+              <div className="chart-area-md">
                 <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart
-                    data={horizonData}
-                    margin={{ top: 10, right: 20, left: 0, bottom: 20 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#1f2d4a" vertical={false} />
-                    <XAxis
-                      dataKey="bin"
-                      stroke="#64748b"
-                      tick={{ fill: '#9ca3af', fontSize: 11 }}
-                    />
-                    <YAxis
-                      stroke="#64748b"
-                      tick={{ fill: '#9ca3af', fontSize: 11 }}
-                      unit=" MW"
-                    />
-                    <Tooltip content={<CustomChartTooltip />} />
-                    <Legend verticalAlign="top" align="right" wrapperStyle={{ paddingBottom: '8px' }} />
-                    <Bar
-                      dataKey="mae"
-                      name="MAE (Magnitude)"
-                      fill="#3b82f6"
-                      radius={[4, 4, 0, 0]}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="me"
-                      name="Bias (ME)"
-                      stroke="#f59e0b"
-                      strokeWidth={2}
-                      dot={{ r: 3 }}
-                    />
+                  <ComposedChart data={horizonData} margin={{ top: 10, right: 20, left: 0, bottom: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false} />
+                    <XAxis dataKey="bin" stroke="#334155" tick={{ fill: '#64748b', fontSize: 11, fontFamily: 'var(--font-mono)' }} />
+                    <YAxis stroke="#334155" tick={{ fill: '#64748b', fontSize: 11, fontFamily: 'var(--font-mono)' }} unit=" MW" />
+                    <Tooltip content={<GenericTooltip />} />
+                    <Legend verticalAlign="top" align="right" wrapperStyle={{ paddingBottom: '10px', fontSize: '0.72rem' }} />
+                    <Bar dataKey="mae" name="MAE" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                    <Line type="monotone" dataKey="me" name="Bias (ME)" stroke="#f59e0b" strokeWidth={2.5} dot={{ r: 3 }} />
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>
             </div>
 
-            {/* Chart 2: Daily Trend */}
-            <div className="chart-card">
-              <div className="chart-header">
-                <div>
-                  <h3 className="chart-title">Daily Forecast Accuracy Trend</h3>
-                  <p className="chart-subtitle">
-                    Daily decision-time MAE and Bias across January 2026 delivery days.
-                  </p>
+            {/* Risk summary card */}
+            <div className="risk-summary-card">
+              <div className="risk-summary-title">Risk Summary</div>
+
+              <div className="risk-row">
+                <span className="risk-label">Max Over-Forecast</span>
+                <span className="risk-value" style={{ color: 'var(--accent-rose)' }}>
+                  +{overall.max_over_forecast?.toLocaleString()} MW
+                </span>
+              </div>
+              <div className="risk-row">
+                <span className="risk-label">Max Under-Forecast</span>
+                <span className="risk-value" style={{ color: 'var(--accent-emerald)' }}>
+                  {overall.max_under_forecast?.toLocaleString()} MW
+                </span>
+              </div>
+              <div className="risk-row">
+                <span className="risk-label">P90 Abs Error</span>
+                <span className="risk-value">{overall.P90_abs_error?.toLocaleString()} MW</span>
+              </div>
+              <div className="risk-row">
+                <span className="risk-label">P95 Abs Error</span>
+                <span className="risk-value">{overall.P95_abs_error?.toLocaleString()} MW</span>
+              </div>
+              <div className="risk-row">
+                <span className="risk-label">Normalized MAE</span>
+                <span className="risk-value">{overall.nMAE_pct}%</span>
+              </div>
+
+              {/* Insight card */}
+              <div className="insight-card" style={{ marginTop: '0.5rem' }}>
+                <div className="insight-title">Hedging Implication</div>
+                <div className="insight-text">
+                  Persistent over-forecast bias ({overall.ME != null && overall.ME > 0 ? `+${overall.ME.toLocaleString()}` : overall.ME?.toLocaleString()} MW) means actual wind frequently under-delivers. Consider a thermal buffer on day-ahead auction.
+                </div>
+                <div className="insight-metrics">
+                  <div className="insight-metric-row">
+                    <span>Suggested Buffer</span>
+                    <span className="insight-metric-badge">
+                      +{overall.MAE ? Math.round(overall.MAE * 0.5) : '—'}
+                    </span>
+                  </div>
+                  <div className="insight-metric-row">
+                    <span>Tail Risk Envelope</span>
+                    <span className="insight-metric-badge">P95</span>
+                  </div>
                 </div>
               </div>
-              <div className="chart-wrapper-compact">
+            </div>
+          </div>
+
+          {/* Charts row: Daily + Hourly */}
+          <div className="charts-grid-2">
+            <div className="chart-card">
+              <div className="chart-card-header">
+                <div>
+                  <div className="chart-card-title">Daily Accuracy Trend</div>
+                  <div className="chart-card-desc">Decision-time MAE and bias per delivery day.</div>
+                </div>
+              </div>
+              <div className="chart-area-md">
                 <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart
-                    data={dailyData}
-                    margin={{ top: 10, right: 20, left: 0, bottom: 20 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#1f2d4a" vertical={false} />
-                    <XAxis
-                      dataKey="date"
-                      stroke="#64748b"
-                      tick={{ fill: '#9ca3af', fontSize: 11 }}
-                    />
-                    <YAxis
-                      stroke="#64748b"
-                      tick={{ fill: '#9ca3af', fontSize: 11 }}
-                      unit=" MW"
-                    />
-                    <Tooltip content={<CustomDailyTooltip />} />
-                    <Legend verticalAlign="top" align="right" wrapperStyle={{ paddingBottom: '8px' }} />
+                  <ComposedChart data={dailyData} margin={{ top: 10, right: 20, left: 0, bottom: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false} />
+                    <XAxis dataKey="date" stroke="#334155" tick={{ fill: '#64748b', fontSize: 11, fontFamily: 'var(--font-mono)' }} />
+                    <YAxis stroke="#334155" tick={{ fill: '#64748b', fontSize: 11, fontFamily: 'var(--font-mono)' }} unit=" MW" />
+                    <Tooltip content={<DailyTooltip />} />
+                    <Legend verticalAlign="top" align="right" wrapperStyle={{ paddingBottom: '10px', fontSize: '0.72rem' }} />
                     <ReferenceLine y={0} stroke="#334155" />
-                    <Line
-                      type="monotone"
-                      dataKey="mae"
-                      name="Daily MAE"
-                      stroke="#06b6d4"
-                      strokeWidth={2.5}
-                      dot={{ r: 3 }}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="me"
-                      name="Daily Bias (ME)"
-                      stroke="#f43f5e"
-                      strokeWidth={1.5}
-                      strokeDasharray="4 4"
-                      dot={{ r: 2 }}
-                    />
+                    <Line type="monotone" dataKey="mae" name="Daily MAE" stroke="#22d3ee" strokeWidth={2.5} dot={{ r: 2.5 }} />
+                    <Line type="monotone" dataKey="me" name="Daily Bias" stroke="#ec4899" strokeWidth={1.5} strokeDasharray="4 4" dot={{ r: 2 }} />
                   </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            <div className="chart-card">
+              <div className="chart-card-header">
+                <div>
+                  <div className="chart-card-title">Error by Hour of Day</div>
+                  <div className="chart-card-desc">Intraday variation across 24 settlement hours (UTC).</div>
+                </div>
+              </div>
+              <div className="chart-area-md">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={hourData} margin={{ top: 10, right: 20, left: 0, bottom: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false} />
+                    <XAxis dataKey="hour" stroke="#334155" tick={{ fill: '#64748b', fontSize: 10, fontFamily: 'var(--font-mono)' }} interval={2} />
+                    <YAxis stroke="#334155" tick={{ fill: '#64748b', fontSize: 11, fontFamily: 'var(--font-mono)' }} unit=" MW" />
+                    <Tooltip content={<GenericTooltip />} />
+                    <Legend verticalAlign="top" align="right" wrapperStyle={{ paddingBottom: '10px', fontSize: '0.72rem' }} />
+                    <Bar dataKey="mae" name="MAE by Hour" fill="#a855f7" radius={[4, 4, 0, 0]} />
+                  </BarChart>
                 </ResponsiveContainer>
               </div>
             </div>
           </div>
 
-          {/* Row 2: By Hour of Day & Error Distribution */}
-          <div className="charts-grid-2col">
-            {/* Chart 3: By Hour of Day */}
-            <div className="chart-card">
-              <div className="chart-header">
-                <div>
-                  <h3 className="chart-title">Accuracy by Hour of Delivery Day</h3>
-                  <p className="chart-subtitle">
-                    Intraday variation in forecast performance (00:00 to 23:00 UTC).
-                  </p>
+          {/* Error distribution histogram */}
+          <div className="chart-card">
+            <div className="chart-card-header">
+              <div>
+                <div className="chart-card-title">Error Distribution Histogram</div>
+                <div className="chart-card-desc">
+                  Frequency distribution of forecast error (positive = over-forecast). 500 MW bins.
                 </div>
               </div>
-              <div className="chart-wrapper-compact">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
-                    data={hourData}
-                    margin={{ top: 10, right: 20, left: 0, bottom: 20 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#1f2d4a" vertical={false} />
-                    <XAxis
-                      dataKey="hour"
-                      stroke="#64748b"
-                      tick={{ fill: '#9ca3af', fontSize: 10 }}
-                      interval={2}
-                    />
-                    <YAxis
-                      stroke="#64748b"
-                      tick={{ fill: '#9ca3af', fontSize: 11 }}
-                      unit=" MW"
-                    />
-                    <Tooltip content={<CustomChartTooltip />} />
-                    <Legend verticalAlign="top" align="right" wrapperStyle={{ paddingBottom: '8px' }} />
-                    <Bar
-                      dataKey="mae"
-                      name="MAE (MW)"
-                      fill="#8b5cf6"
-                      radius={[3, 3, 0, 0]}
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
+              <div className="chart-tags">
+                <span className="chart-tag">500 MW bins</span>
+                <span className="chart-tag">Decision-time basis</span>
               </div>
             </div>
-
-            {/* Chart 4: Error Distribution Histogram */}
-            <div className="chart-card">
-              <div className="chart-header">
-                <div>
-                  <h3 className="chart-title">Error Distribution (500 MW Bins)</h3>
-                  <p className="chart-subtitle">
-                    Frequency histogram of decision-time error (positive = over-forecast).
-                  </p>
-                </div>
-              </div>
-              <div className="chart-wrapper-compact">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
-                    data={histData}
-                    margin={{ top: 10, right: 20, left: 0, bottom: 20 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#1f2d4a" vertical={false} />
-                    <XAxis
-                      dataKey="bin"
-                      stroke="#64748b"
-                      tick={{ fill: '#9ca3af', fontSize: 9 }}
-                      angle={-30}
-                      textAnchor="end"
-                      height={45}
-                    />
-                    <YAxis
-                      stroke="#64748b"
-                      tick={{ fill: '#9ca3af', fontSize: 11 }}
-                      unit=" hrs"
-                    />
-                    <Tooltip content={<CustomHistTooltip />} />
-                    <ReferenceLine x="0 to 500" stroke="#f59e0b" strokeDasharray="2 2" />
-                    <Bar
-                      dataKey="count"
-                      name="Observation Count"
-                      fill="#06b6d4"
-                      radius={[3, 3, 0, 0]}
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+            <div className="chart-area-md">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={histData} margin={{ top: 10, right: 20, left: 0, bottom: 35 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false} />
+                  <XAxis
+                    dataKey="bin"
+                    stroke="#334155"
+                    tick={{ fill: '#64748b', fontSize: 9, fontFamily: 'var(--font-mono)' }}
+                    angle={-25}
+                    textAnchor="end"
+                    height={45}
+                    label={{ value: 'Error (MW)', position: 'insideBottom', offset: -10, fill: '#475569', fontSize: 11 }}
+                  />
+                  <YAxis stroke="#334155" tick={{ fill: '#64748b', fontSize: 11, fontFamily: 'var(--font-mono)' }} unit=" hrs" />
+                  <Tooltip content={<HistTooltip />} />
+                  <Bar dataKey="count" name="Hours in Bin" fill="#22d3ee" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
             </div>
           </div>
         </>
@@ -395,69 +329,66 @@ export const AccuracyView: React.FC<AccuracyViewProps> = ({
   );
 };
 
-// Tooltip helpers
-const CustomChartTooltip = ({ active, payload, label }: any) => {
-  if (!active || !payload || !payload.length) return null;
+/* ── Tooltips ──────────────────────────────────────────────────────── */
+
+const GenericTooltip = ({ active, payload, label }: any) => {
+  if (!active || !payload?.length) return null;
   return (
-    <div className="custom-recharts-tooltip">
-      <div className="tooltip-time">{label}</div>
-      {payload.map((p: any, idx: number) => (
-        <div key={idx} className="tooltip-row">
-          <span className="tooltip-row-label">{p.name}:</span>
-          <span className="tooltip-row-value" style={{ color: p.color || '#fff' }}>
-            {p.value?.toLocaleString()} MW
-          </span>
+    <div className="chart-tooltip">
+      <div className="chart-tooltip-header">{label}</div>
+      {payload.map((p: any, i: number) => (
+        <div key={i} className="chart-tooltip-row">
+          <span className="chart-tooltip-label">{p.name}:</span>
+          <span className="chart-tooltip-value" style={{ color: p.color }}>{p.value?.toLocaleString()} MW</span>
         </div>
       ))}
       {payload[0]?.payload?.n != null && (
-        <div className="tooltip-row" style={{ marginTop: '0.25rem', borderTop: '1px solid #1f2d4a', paddingTop: '0.25rem' }}>
-          <span className="tooltip-row-label">Sample (n):</span>
-          <span className="tooltip-row-value">{payload[0].payload.n} hours</span>
-        </div>
+        <>
+          <div className="chart-tooltip-divider" />
+          <div className="chart-tooltip-row">
+            <span className="chart-tooltip-label">Sample:</span>
+            <span className="chart-tooltip-value">{payload[0].payload.n} hrs</span>
+          </div>
+        </>
       )}
     </div>
   );
 };
 
-const CustomDailyTooltip = ({ active, payload }: any) => {
-  if (!active || !payload || !payload.length) return null;
+const DailyTooltip = ({ active, payload }: any) => {
+  if (!active || !payload?.length) return null;
   const p = payload[0]?.payload;
   if (!p) return null;
   return (
-    <div className="custom-recharts-tooltip">
-      <div className="tooltip-time">{p.fullDate}</div>
-      <div className="tooltip-row">
-        <span className="tooltip-row-label">Daily MAE:</span>
-        <span className="tooltip-row-value" style={{ color: '#06b6d4' }}>
-          {p.mae?.toLocaleString()} MW
-        </span>
+    <div className="chart-tooltip">
+      <div className="chart-tooltip-header">{p.fullDate}</div>
+      <div className="chart-tooltip-row">
+        <span className="chart-tooltip-label">Daily MAE:</span>
+        <span className="chart-tooltip-value" style={{ color: '#22d3ee' }}>{p.mae?.toLocaleString()} MW</span>
       </div>
-      <div className="tooltip-row">
-        <span className="tooltip-row-label">Daily Bias (ME):</span>
-        <span className="tooltip-row-value" style={{ color: p.me > 0 ? '#f43f5e' : '#10b981' }}>
+      <div className="chart-tooltip-row">
+        <span className="chart-tooltip-label">Daily Bias:</span>
+        <span className="chart-tooltip-value" style={{ color: p.me > 0 ? '#ec4899' : '#10b981' }}>
           {p.me > 0 ? `+${p.me?.toLocaleString()}` : p.me?.toLocaleString()} MW
         </span>
       </div>
-      <div className="tooltip-row" style={{ marginTop: '0.25rem', borderTop: '1px solid #1f2d4a', paddingTop: '0.25rem' }}>
-        <span className="tooltip-row-label">Evaluated slots:</span>
-        <span className="tooltip-row-value">{p.n} hours</span>
+      <div className="chart-tooltip-divider" />
+      <div className="chart-tooltip-row">
+        <span className="chart-tooltip-label">Hours:</span>
+        <span className="chart-tooltip-value">{p.n}</span>
       </div>
     </div>
   );
 };
 
-const CustomHistTooltip = ({ active, payload, label }: any) => {
-  if (!active || !payload || !payload.length) return null;
-  const p = payload[0]?.payload;
-  if (!p) return null;
+const HistTooltip = ({ active, payload, label }: any) => {
+  if (!active || !payload?.length) return null;
   return (
-    <div className="custom-recharts-tooltip">
-      <div className="tooltip-time">Error Range: {label} MW</div>
-      <div className="tooltip-row">
-        <span className="tooltip-row-label">Frequency:</span>
-        <span className="tooltip-row-value" style={{ color: '#06b6d4' }}>
-          {p.count?.toLocaleString()} hours
-        </span>
+    <div className="chart-tooltip">
+      <div className="chart-tooltip-header">Error: {label} MW</div>
+      <div className="chart-tooltip-row">
+        <span className="chart-tooltip-label">Count:</span>
+        <span className="chart-tooltip-value" style={{ color: '#22d3ee' }}>{payload[0]?.value?.toLocaleString()} hrs</span>
       </div>
     </div>
   );

@@ -1,36 +1,39 @@
 import React from 'react';
 
-interface MetricCardProps {
-  title: string;
+export interface MetricCardProps {
+  label: string;
   value: string | number | null | undefined;
   unit?: string;
-  tooltipNote: string;
-  badge?: {
-    text: string;
-    type: 'over' | 'under' | 'neutral';
-  };
+  footer?: string;
+  accent?: 'cyan' | 'blue' | 'emerald' | 'amber' | 'rose' | 'purple' | 'pink';
+  trend?: { direction: 'up' | 'down' | 'neutral'; text: string };
 }
 
 export const MetricCard: React.FC<MetricCardProps> = ({
-  title,
+  label,
   value,
   unit,
-  tooltipNote,
-  badge,
+  footer,
+  accent = 'cyan',
+  trend,
 }) => {
   const displayVal = value !== null && value !== undefined ? value : '—';
 
   return (
-    <div className="metric-card" title={tooltipNote}>
-      <div className="metric-header">
-        <span className="metric-title">{title}</span>
-        {badge && <span className={`metric-badge ${badge.type}`}>{badge.text}</span>}
+    <div className={`stat-card ${accent}`}>
+      <span className="stat-card-label">{label}</span>
+      <div className="stat-card-value">
+        {displayVal}
+        {unit && <span className="unit">{unit}</span>}
       </div>
-      <div className="metric-value-row">
-        <span className="metric-value">{displayVal}</span>
-        {unit && <span className="metric-unit">{unit}</span>}
+      <div className="stat-card-footer">
+        {trend && (
+          <span className={`stat-card-trend ${trend.direction === 'up' ? 'up' : trend.direction === 'down' ? 'down' : 'neutral'}`}>
+            {trend.direction === 'up' ? '↑' : trend.direction === 'down' ? '↓' : '●'} {trend.text}
+          </span>
+        )}
+        {footer && <span style={{ marginLeft: trend ? '0.5rem' : 0 }}>{footer}</span>}
       </div>
-      <p className="metric-tooltip-note">{tooltipNote}</p>
     </div>
   );
 };

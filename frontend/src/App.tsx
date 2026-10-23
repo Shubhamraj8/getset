@@ -1,110 +1,132 @@
 import React, { useEffect, useState } from 'react';
 import { fetchMeta, type MetaResponse } from './api';
-import { AccuracyView } from './components/AccuracyView';
 import { ForecastView } from './components/ForecastView';
+import { AccuracyView } from './components/AccuracyView';
+import { Wind } from 'lucide-react';
+
+type TabId = 'forecast' | 'accuracy';
 
 export const App: React.FC = () => {
   const [meta, setMeta] = useState<MetaResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'forecast' | 'accuracy'>('forecast');
+  const [activeTab, setActiveTab] = useState<TabId>('forecast');
+  const [selectedDate, setSelectedDate] = useState<string>('2026-01-15');
+  const [cutoffHour, setCutoffHour] = useState<number>(9);
 
   useEffect(() => {
     fetchMeta()
-      .then((data) => {
-        setMeta(data);
+      .then((m) => {
+        setMeta(m);
+        setCutoffHour(m.default_cutoff_hour);
+        const initial = m.delivery_days.includes('2026-01-15')
+          ? '2026-01-15'
+          : m.delivery_days[0];
+        setSelectedDate(initial);
         setLoading(false);
       })
       .catch((err) => {
-        setError(err.message || 'Could not connect to backend API');
+        console.error('Failed to load metadata', err);
         setLoading(false);
       });
   }, []);
 
-  return (
-    <div className="app-container">
-      {/* Header */}
-      <header className="app-header">
-        <div className="brand-section">
-          <div className="brand-logo">⚡</div>
-          <div className="brand-title">
-            <h1>
-              getset <span className="badge-tag">GB Day-Ahead</span>
-            </h1>
-            <p className="brand-subtitle">
-              UK National Wind Forecast Monitor & Quantitative Accuracy Evaluation
-            </p>
-          </div>
+  if (loading) {
+    return (
+      <div className="app-shell">
+        <div className="state-box" style={{ minHeight: '60vh' }}>
+          <div className="spinner" />
+          <p>Loading Elexon BMRS data…</p>
         </div>
+      </div>
+    );
+  }
 
-        {/* Tab Switcher */}
-        <nav className="tab-navigation" aria-label="Main Navigation">
-          <button
-            className={`tab-button ${activeTab === 'forecast' ? 'active' : ''}`}
-            onClick={() => setActiveTab('forecast')}
-          >
-            <span>📈 Forecast Monitor</span>
-          </button>
-          <button
-            className={`tab-button ${activeTab === 'accuracy' ? 'active' : ''}`}
-            onClick={() => setActiveTab('accuracy')}
-          >
-            <span>🎯 Accuracy & Bias</span>
-          </button>
-        </nav>
-      </header>
+  if (!meta) {
+    return (
+      <div className="app-shell">
+        <div className="state-box" style={{ minHeight: '60vh' }}>
+          <p>Failed to connect to API. Make sure the backend is running.</p>
+        </div>
+      </div>
+    );
+  }
 
-      {/* Main Content Area */}
-      <main>
-        {error && (
-          <div className="error-banner">
-            <span>⚠️ {error}</span>
-          </div>
-        )}
-
-        {loading ? (
-          <div className="state-box" style={{ minHeight: '400px' }}>
-            <div className="spinner" />
-            <p>Initializing getset data snapshot from Elexon BMRS...</p>
-          </div>
-        ) : meta ? (
-          <>
-            {activeTab === 'forecast' && (
-              <ForecastView
-                deliveryDays={meta.delivery_days}
-                defaultDate={meta.delivery_days[meta.delivery_days.length - 1] || '2026-02-01'}
-                defaultCutoffHour={meta.default_cutoff_hour}
-              />
-            )}
-
-            {activeTab === 'accuracy' && (
-              <AccuracyView
-                deliveryDays={meta.delivery_days}
-                defaultStartDate={meta.delivery_days[0] || '2026-01-02'}
-                defaultEndDate={meta.delivery_days[meta.delivery_days.length - 1] || '2026-02-01'}
-                defaultCutoffHour={meta.default_cutoff_hour}
-              />
-            )}
-          </>
-        ) : null}
-      </main>
-
-      {/* Footer per §9: Source, timezone, units */}
-      <footer className="app-footer">
-        <div className="footer-attribution">
-          <div className="footer-note">
-            Source: Elexon BMRS · FUELHH &amp; WINDFOR · times in UTC (= UK time in January) · MW
+  return (
+    <div className="app-shell">
+      {/* ── Top Bar ──────────────────────────────────── */}
+      <header className="topbar">
+        <div className="topbar-brand">
+          <div className="topbar-logo">
+            <Wind size={20} />
           </div>
           <div>
-            Built for UK Day-Ahead Power Procurement Desks · Scope: January 2026 Decisions
+            <div className="topbar-title">getset</div>
+            <div className="topbar-subtitle">UK Wind · Day-Ahead Monitor</div>
           </div>
         </div>
-        {meta && (
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-            Dataset: {meta.n_forecast_rows.toLocaleString()} forecast rows ·{' '}
-            {meta.n_actual_rows.toLocaleString()} actual rows
+
+        <nav className="topbar-nav">
+          <button
+            type="button"
+            className={`topbar-nav-btn ${activeTab === 'forecast' ? 'active' : ''}`}
+            onClick={() => setActiveTab('forecast')}
+          >
+            Forecast Replay
+          </button>
+          <button
+            type="button"
+            className={`topbar-nav-btn ${activeTab === 'accuracy' ? 'active' : ''}`}
+            onClick={() => setActiveTab('accuracy')}
+          >
+            Accuracy Analysis
+          </button>
+        </nav>
+
+        <div className="topbar-controls">
+          {activeTab === 'forecast' && (
+            <div className="topbar-control-group">
+              <span>Delivery:</span>
+              <select
+                className="topbar-select"
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+              >
+                {meta.delivery_days.map((d) => (
+                  <option key={d} value={d}>{d}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          <div className="cutoff-badge">
+            {String(cutoffHour).padStart(2, '0')}:00 UTC cutoff
           </div>
-        )}
+        </div>
+      </header>
+
+      {/* ── Tab Content ──────────────────────────────── */}
+      {activeTab === 'forecast' ? (
+        <ForecastView
+          deliveryDays={meta.delivery_days}
+          defaultDate={selectedDate}
+          defaultCutoffHour={cutoffHour}
+        />
+      ) : (
+        <AccuracyView
+          deliveryDays={meta.delivery_days}
+          defaultStartDate={meta.delivery_days[0]}
+          defaultEndDate={meta.delivery_days[meta.delivery_days.length - 1]}
+          defaultCutoffHour={cutoffHour}
+        />
+      )}
+
+      {/* ── Footer ───────────────────────────────────── */}
+      <footer className="app-footer">
+        <div>
+          Source: Elexon BMRS · FUELHH (actuals) & WINDFOR (forecasts) · UTC (= UK time in Jan) · MW
+        </div>
+        <div style={{ fontFamily: 'var(--font-mono)' }}>
+          {meta.n_forecast_rows.toLocaleString()} forecasts · {meta.n_actual_rows.toLocaleString()} actuals
+        </div>
       </footer>
     </div>
   );
